@@ -1,0 +1,27 @@
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+
+# Virtual environments
+.venv/
+
+# macOS / editor
+.DS_Store
+*.swp
+*.swo
+
+# Local runtime outputs
+artifacts/**
+!artifacts/.gitkeep
+
+# Profiler outputs
+*.nsys-rep
+*.ncu-rep
+*.qdrep
+*.sqlite
+
+# Misc temp files
+*.tmp
+*.bak
