@@ -1,0 +1,4 @@
+interface:
+  display_name: "PTX Dump (Modal)"
+  short_description: "Dump CUTLASS PTX/CUBIN from Modal B200 builds."
+  default_prompt: "Use this skill to dump PTX (and optional CUBIN) from kernel compile on Modal B200 using tools/dump_ptx_modal.py."

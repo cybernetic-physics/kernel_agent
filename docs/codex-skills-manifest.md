@@ -1,0 +1,20 @@
+# Codex Skills Manifest
+
+- captured_utc: 2026-02-22T05:51:43Z
+- source_root: `/Users/cuboniks/.codex/skills`
+- local_root: `skills/codex`
+
+| Skill | Description | Local Path | Source Path |
+|---|---|---|---|
+| `skill-creator` | Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. | `skills/codex/.system/skill-creator` | `/Users/cuboniks/.codex/skills/.system/skill-creator/SKILL.md` |
+| `skill-installer` | Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). | `skills/codex/.system/skill-installer` | `/Users/cuboniks/.codex/skills/.system/skill-installer/SKILL.md` |
+| `cubin-disasm` | Disassemble generated CUBIN to SASS on Modal B200 with nvdisasm for low-level instruction inspection. | `skills/codex/cubin-disasm` | `/Users/cuboniks/.codex/skills/cubin-disasm/SKILL.md` |
+| `cutlass-compile-debug` | Run deep CUTLASS/CuTe compile diagnostics on Modal B200 and collect rich failure artifacts (traceback, IR/PTX/CUBIN, logs) when popcorn-cli output is too terse. | `skills/codex/cutlass-compile-debug` | `/Users/cuboniks/.codex/skills/cutlass-compile-debug/SKILL.md` |
+| `gpu-profiler` | Profile CUTLASS kernels on Modal B200 with working paths. Prefer torch.profiler kernel-time breakdown; use nsys only as supplemental range/timeline signal. | `skills/codex/gpu-profiler` | `/Users/cuboniks/.codex/skills/gpu-profiler/SKILL.md` |
+| `modal-b200-snippet-policy` | Enforce mandatory Modal execution for any Python, CUTLASS, or GPU snippet in lean4real. Use when running quick sanity checks, ad-hoc code snippets, or CUTLASS experiments so execution always goes through tools/modal_python_exec.py on B200 with required env sourcing, sanity prints, and one-retry failure handling. | `skills/codex/modal-b200-snippet-policy` | `/Users/cuboniks/.codex/skills/modal-b200-snippet-policy/SKILL.md` |
+| `popcorn-benchmark-run` | Run POPCORN benchmark mode for a kernel with a foolproof artifact flow that records repo git hash and kernel diff against that hash, then append Codex analysis/thoughts from benchmark feedback. | `skills/codex/popcorn-benchmark-run` | `/Users/cuboniks/.codex/skills/popcorn-benchmark-run/SKILL.md` |
+| `popcorn-leaderboard-run` | Run POPCORN leaderboard mode for a kernel with a foolproof artifact flow that records repo git hash and kernel diff against that hash, then append Codex analysis/thoughts including ranked feedback and outliers. | `skills/codex/popcorn-leaderboard-run` | `/Users/cuboniks/.codex/skills/popcorn-leaderboard-run/SKILL.md` |
+| `popcorn-test-run` | Run POPCORN test mode for a kernel with a foolproof artifact flow that records repo git hash and kernel diff against that hash, then append Codex analysis/thoughts from the run feedback. | `skills/codex/popcorn-test-run` | `/Users/cuboniks/.codex/skills/popcorn-test-run/SKILL.md` |
+| `ptx-dump` | Dump raw PTX and CUBIN for CUTLASS DSL kernels on Modal B200 using `tools/dump_ptx_modal.py`. Use when validating generated codegen, sharing compiler artifacts, or comparing emitted PTX/SASS-relevant binaries across kernel changes. | `skills/codex/ptx-dump` | `/Users/cuboniks/.codex/skills/ptx-dump/SKILL.md` |
+| `speech` | Use when the user asks for text-to-speech narration or voiceover, accessibility reads, audio prompts, or batch speech generation via the OpenAI Audio API; run the bundled CLI (`scripts/text_to_speech.py`) with built-in voices and require `OPENAI_API_KEY` for live calls. Custom voice creation is out of scope. | `skills/codex/speech` | `/Users/cuboniks/.codex/skills/speech/SKILL.md` |
+| `torch-profiler-modal` | Profile CUTLASS kernels on Modal B200 using torch.profiler CUDA activity to get per-kernel timing when Nsight counters are unavailable. | `skills/codex/torch-profiler-modal` | `/Users/cuboniks/.codex/skills/torch-profiler-modal/SKILL.md` |

@@ -1,0 +1,4 @@
+interface:
+  display_name: "GPU Profiler (Modal)"
+  short_description: "Run Modal B200 NSYS profiling with caveats."
+  default_prompt: "Use this skill to profile kernels on Modal B200 with the working NSYS flow and interpret results correctly."

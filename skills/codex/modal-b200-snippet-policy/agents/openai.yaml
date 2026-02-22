@@ -1,0 +1,4 @@
+interface:
+  display_name: "Modal B200 Snippet Policy"
+  short_description: "Mandatory Modal executor policy for Python/CUTLASS/GPU snippets."
+  default_prompt: "Use this skill for any Python/CUTLASS/GPU snippet and enforce the B200 modal execution policy exactly."
