@@ -42,9 +42,8 @@ This mode is called `with_module_ip` in the script and is the stable path used t
 ## Command used
 
 ```bash
-set -a; source /Users/cuboniks/Projects/kernel_projects/kernel_rl/.env; set +a
-/Users/cuboniks/Projects/kernel_projects/kernel_rl/.venv/bin/modal run \
-  tools/dump_internal_layout_tuples_modal_b200.py
+set -a; source .env; set +a
+uv run --with modal modal run tools/dump_internal_layout_tuples_modal_b200.py
 ```
 
 You can also run through `uv`:

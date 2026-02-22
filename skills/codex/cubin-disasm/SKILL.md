@@ -11,7 +11,7 @@ Use this after PTX/CUBIN dump or compile-debug to inspect emitted SASS.
 
 1. Source env:
 ```bash
-set -a; source ../kernel_rl/.env; set +a
+set -a; source .env; set +a
 ```
 2. Disassemble all cubins in a directory:
 ```bash

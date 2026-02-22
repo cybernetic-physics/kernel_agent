@@ -3,7 +3,7 @@
 This guide shows how to run `popcorn-cli` for this kernel from repo root:
 
 ```bash
-cd /Users/cuboniks/Projects/kernel_projects/lean4real
+cd /path/to/kernel_agents
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
@@ -37,7 +37,7 @@ popcorn-cli submit --no-tui \
 
 ```bash
 popcorn-cli submit --no-tui \
-  --output kernels/nvfp4_group_gemm/wagmiv67.benchmark.txt \
+  --output artifacts/wagmiv67.benchmark.txt \
   --gpu B200 \
   --leaderboard nvfp4_group_gemm \
   --mode benchmark \
@@ -48,7 +48,7 @@ popcorn-cli submit --no-tui \
 
 ```bash
 popcorn-cli submit --no-tui \
-  --output kernels/nvfp4_group_gemm/wagmiv67.leaderboard.txt \
+  --output artifacts/wagmiv67.leaderboard.txt \
   --gpu B200 \
   --leaderboard nvfp4_group_gemm \
   --mode leaderboard \

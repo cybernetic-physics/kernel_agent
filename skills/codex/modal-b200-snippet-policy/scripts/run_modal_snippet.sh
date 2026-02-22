@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Enforce repository + environment defaults for lean4real Modal snippet runs.
-REPO_ROOT="${REPO_ROOT:-/Users/cuboniks/Projects/kernel_projects/lean4real}"
+# Enforce repository + environment defaults for kernel_agents Modal snippet runs.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT_DEFAULT="$(cd -- "$SCRIPT_DIR/../../../../" && pwd)"
+REPO_ROOT="${REPO_ROOT:-$REPO_ROOT_DEFAULT}"
 GPU="${GPU:-B200}"
-ENV_FILE="${ENV_FILE:-$REPO_ROOT/../kernel_rl/.env}"
+ENV_FILE="${ENV_FILE:-$REPO_ROOT/.env}"
 
 if [[ ! -d "$REPO_ROOT" ]]; then
   echo "error: repo root not found: $REPO_ROOT" >&2

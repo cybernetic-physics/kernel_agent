@@ -1,6 +1,6 @@
 ---
 name: modal-b200-snippet-policy
-description: Enforce mandatory Modal execution for any Python, CUTLASS, or GPU snippet in lean4real. Use when running quick sanity checks, ad-hoc code snippets, or CUTLASS experiments so execution always goes through tools/modal_python_exec.py on B200 with required env sourcing, sanity prints, and one-retry failure handling.
+description: Enforce mandatory Modal execution for any Python, CUTLASS, or GPU snippet in this repo. Use when running quick sanity checks, ad-hoc code snippets, or CUTLASS experiments so execution always goes through tools/modal_python_exec.py on B200 with required env sourcing, sanity prints, and one-retry failure handling.
 ---
 
 # Modal B200 Snippet Policy
@@ -11,7 +11,7 @@ Run all Python/CUTLASS/GPU snippets through Modal B200 only. Do not run local Py
 
 1. Source env first:
 ```bash
-set -a; source ../kernel_rl/.env; set +a
+set -a; source .env; set +a
 ```
 2. Execute via Modal executor:
 ```bash
@@ -41,7 +41,7 @@ PY
 Use this wrapper script so env/gpu/repo defaults are enforced:
 
 ```bash
-bash scripts/run_modal_snippet.sh --code "import torch; print(torch.cuda.is_available())"
+bash skills/codex/modal-b200-snippet-policy/scripts/run_modal_snippet.sh --code "import torch; print(torch.cuda.is_available())"
 ```
 
 ## Command patterns
@@ -49,28 +49,28 @@ bash scripts/run_modal_snippet.sh --code "import torch; print(torch.cuda.is_avai
 Run inline code:
 
 ```bash
-bash scripts/run_modal_snippet.sh \
+bash skills/codex/modal-b200-snippet-policy/scripts/run_modal_snippet.sh \
   --code "import torch, cutlass; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
 Run a code file:
 
 ```bash
-bash scripts/run_modal_snippet.sh --code-file /tmp/snippet.py
+bash skills/codex/modal-b200-snippet-policy/scripts/run_modal_snippet.sh --code-file /tmp/snippet.py
 ```
 
 Run piped stdin snippet:
 
 ```bash
-cat /tmp/snippet.py | bash scripts/run_modal_snippet.sh
+cat /tmp/snippet.py | bash skills/codex/modal-b200-snippet-policy/scripts/run_modal_snippet.sh
 ```
 
 ## CUTLASS sanity template
 
 ```bash
-bash scripts/run_modal_snippet.sh --code "import cutlass, torch; print('cuda_available', torch.cuda.is_available()); print('gpu', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
+bash skills/codex/modal-b200-snippet-policy/scripts/run_modal_snippet.sh --code "import cutlass, torch; print('cuda_available', torch.cuda.is_available()); print('gpu', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
 ```
 
 ## Retry rule
 
-`scripts/run_modal_snippet.sh` already retries once on failure using the same command and surfaces stderr. If the second attempt fails, stop and revert the last kernel edit.
+`skills/codex/modal-b200-snippet-policy/scripts/run_modal_snippet.sh` already retries once on failure using the same command and surfaces stderr. If the second attempt fails, stop and revert the last kernel edit.

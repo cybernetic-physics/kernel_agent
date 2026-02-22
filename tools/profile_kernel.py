@@ -12,7 +12,7 @@ Local usage (B200 present):
 
 Remote usage (Modal B200):
 
-    set -a; source ../kernel_rl/.env; set +a
+    set -a; source .env; set +a
     uv run --with modal python tools/profile_kernel.py \\
         --kernel kernels/nvfp4_group_gemm/wagmiv67.py --mode ncu --remote
 

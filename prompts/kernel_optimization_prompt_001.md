@@ -27,7 +27,7 @@ Hard requirements:
   - Always pass `--gpu <gpu_type>`.
 - Python/CUTLASS/GPU snippets:
   - Must follow modal policy:
-    - `set -a; source ../kernel_rl/.env; set +a`
+    - `set -a; source .env; set +a`
     - `uv run --with modal python tools/modal_python_exec.py --gpu <gpu_type> ...`
   - On snippet failure: show stderr, retry once with exact same command, if it fails again revert last kernel edit.
 
@@ -35,16 +35,16 @@ Optimization loop (strict):
 1. Establish clean baseline on current target kernel (test + benchmark).
 2. Apply exactly one kernel-side change per iteration.
 3. Run test:
-   `python3 ~/.codex/skills/popcorn-test-run/scripts/run_submission.py --kernel <kernel_path> --repo-root <repo_root> --gpu <gpu_type> --artifact-only`
+   `python3 skills/codex/popcorn-test-run/scripts/run_submission.py --kernel <kernel_path> --repo-root <repo_root> --gpu <gpu_type> --artifact-only`
 4. Append required test analysis:
-   `python3 ~/.codex/skills/popcorn-test-run/scripts/append_analysis.py --artifact <artifact> --decision <KEEP|REVERT> --summary "<...>" --feedback "<...>" --next-step "<...>"`
+   `python3 skills/codex/popcorn-test-run/scripts/append_analysis.py --artifact <artifact> --decision <KEEP|REVERT> --summary "<...>" --feedback "<...>" --next-step "<...>"`
 5. If test passes, run benchmark:
-   `python3 ~/.codex/skills/popcorn-benchmark-run/scripts/run_submission.py --kernel <kernel_path> --repo-root <repo_root> --gpu <gpu_type> --artifact-only`
+   `python3 skills/codex/popcorn-benchmark-run/scripts/run_submission.py --kernel <kernel_path> --repo-root <repo_root> --gpu <gpu_type> --artifact-only`
 6. Append required benchmark analysis with KEEP/REVERT.
 7. If benchmark fails: include stderr, retry same command once, if it fails again revert last change.
 8. Keep only changes that improve benchmark gmean (or very strong leaderboard evidence). Otherwise revert immediately.
 9. Run leaderboard periodically and for candidates:
-   `python3 ~/.codex/skills/popcorn-leaderboard-run/scripts/run_submission.py --kernel <kernel_path> --repo-root <repo_root> --gpu <gpu_type> --artifact-only`
+   `python3 skills/codex/popcorn-leaderboard-run/scripts/run_submission.py --kernel <kernel_path> --repo-root <repo_root> --gpu <gpu_type> --artifact-only`
    then append required leaderboard analysis.
 10. Continue looping without pausing.
 

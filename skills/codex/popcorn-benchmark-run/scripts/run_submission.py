@@ -8,7 +8,15 @@ import shlex
 import subprocess
 from pathlib import Path
 
-DEFAULT_REPO_ROOT = Path("/Users/cuboniks/Projects/kernel_projects/lean4real")
+
+def _default_repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ".git").exists():
+            return parent
+    return Path.cwd().resolve()
+
+
+DEFAULT_REPO_ROOT = _default_repo_root()
 DEFAULT_MODE = "benchmark"
 
 

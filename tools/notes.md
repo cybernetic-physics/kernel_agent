@@ -3,7 +3,7 @@
 ## B200 extraction workflow (stable)
 
 - Preferred command:
-  - `set -a; source ../kernel_rl/.env; set +a`
+  - `set -a; source .env; set +a`
   - `uv run --with modal modal run tools/dump_internal_layout_tuples_modal_b200.py`
 - Stable execution mode is `with_module_ip`.
 - Default tool behavior now avoids noisy probe paths and runs only `with_module_ip`.

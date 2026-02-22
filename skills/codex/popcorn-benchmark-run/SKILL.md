@@ -11,7 +11,7 @@ Run POPCORN `benchmark` mode with a standardized artifact that always includes:
 - kernel diff against that hash
 - raw `popcorn-cli` output
 
-Default repo root is `/Users/cuboniks/Projects/kernel_projects/lean4real`.
+Default repo root is auto-detected from this repository's git root.
 
 ## Command
 

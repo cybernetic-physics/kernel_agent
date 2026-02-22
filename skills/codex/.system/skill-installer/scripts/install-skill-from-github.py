@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a skill from a GitHub repo path into $CODEX_HOME/skills."""
+"""Install a skill from a GitHub repo path into a local skills directory."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import zipfile
+from pathlib import Path
 
 from github_utils import github_request
 DEFAULT_REF = "main"
@@ -42,8 +43,16 @@ class InstallError(Exception):
     pass
 
 
-def _codex_home() -> str:
-    return os.environ.get("CODEX_HOME", os.path.expanduser("~/.codex"))
+def _repo_root() -> str:
+    override = os.environ.get("SKILLS_REPO_ROOT")
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ".git").exists():
+            return str(parent)
+
+    return os.getcwd()
 
 
 def _tmp_root() -> str:
@@ -241,7 +250,10 @@ def _resolve_source(args: Args) -> Source:
 
 
 def _default_dest() -> str:
-    return os.path.join(_codex_home(), "skills")
+    override = os.environ.get("SKILLS_DEST")
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return os.path.join(_repo_root(), "skills", "codex")
 
 
 def _parse_args(argv: list[str]) -> Args:

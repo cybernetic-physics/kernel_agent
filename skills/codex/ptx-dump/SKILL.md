@@ -11,7 +11,7 @@ Use the reusable PTX dump tool so extraction is deterministic and does not requi
 
 1. Source env:
 ```bash
-set -a; source ../kernel_rl/.env; set +a
+set -a; source .env; set +a
 ```
 2. Dump PTX + CUBIN for a kernel + shape set:
 ```bash

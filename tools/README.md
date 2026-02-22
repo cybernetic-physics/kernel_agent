@@ -9,12 +9,12 @@ This directory contains CLI utilities and helper modules for NVFP4 Group GEMM la
 - For local CUTLASS-dependent scripts:
   - Use an environment where `cutlass.cute` is importable.
 - For Modal B200 scripts:
-  - Export Modal credentials (for this repo, usually `../kernel_rl/.env`).
+  - Export Modal credentials from this repo env file (`.env`).
 
 Example Modal env setup:
 
 ```bash
-set -a; source ../kernel_rl/.env; set +a
+set -a; source .env; set +a
 ```
 
 ## Common workflows
@@ -169,7 +169,7 @@ set -a; source ../kernel_rl/.env; set +a
 - What it does: compiles a CUTLASS DSL kernel on Modal and returns dumped PTX and CUBIN to local files.
 - Why: gives reproducible raw PTX artifacts for inspection/disassembly without relying on local CUDA toolchain.
 - Needs:
-  - Modal auth + env sourced (`set -a; source ../kernel_rl/.env; set +a`)
+  - Modal auth + env sourced (`set -a; source .env; set +a`)
   - Kernel module exposes `compile_kernel(problem_sizes)`.
 - Example:
   - `uv run python tools/dump_ptx_modal.py --kernel kernels/nvfp4_group_gemm/wagmiv67.py --problem-sizes '80,4096,7168,1;40,7168,2048,1' --out artifacts/wagmiv67.sm100a.ptx --json-out artifacts/wagmiv67.sm100a.ptx.json`

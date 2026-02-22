@@ -11,7 +11,7 @@ Use the profiler flow that works reliably on Modal B200.
 
 1. Source env:
 ```bash
-set -a; source ../kernel_rl/.env; set +a
+set -a; source .env; set +a
 ```
 2. Primary path (recommended): torch.profiler per-kernel CUDA times:
 ```bash

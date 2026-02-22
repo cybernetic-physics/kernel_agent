@@ -11,7 +11,7 @@ Use this as the default performance profiler on Modal B200.
 
 1. Source env:
 ```bash
-set -a; source ../kernel_rl/.env; set +a
+set -a; source .env; set +a
 ```
 2. Run torch profiler:
 ```bash

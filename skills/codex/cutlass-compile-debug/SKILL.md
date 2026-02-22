@@ -11,7 +11,7 @@ Use this when popcorn compile/test output is not enough to diagnose a failure.
 
 1. Source env:
 ```bash
-set -a; source ../kernel_rl/.env; set +a
+set -a; source .env; set +a
 ```
 2. Run compile-debug tool on B200:
 ```bash
