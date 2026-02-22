@@ -25,6 +25,7 @@ Probe tool availability on Modal B200:
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime
 import hashlib
 import json
@@ -879,480 +880,200 @@ def _run_local(args: argparse.Namespace) -> dict[str, Any]:
 # Modal remote execution
 # ---------------------------------------------------------------------------
 
-def _generate_modal_runner(
-    gpu: str,
-    probe_only: bool,
-) -> str:
-    """Generate a self-contained Modal script for ``modal run``.
-
-    The generated script embeds the remote function body and uses
-    ``@app.function`` + ``@app.local_entrypoint()`` -- the only pattern
-    that works reliably with the Modal CLI (``app.run()`` programmatic API
-    hangs on ``.remote()`` calls with modal 1.3.x).
-    """
-    # We embed _profile_on_modal_impl's logic directly rather than
-    # importing it, so the generated script is fully self-contained.
-    return f'''\
-#!/usr/bin/env python3
-"""Auto-generated Modal runner for profile_kernel.py. Do not edit."""
-from __future__ import annotations
-
-import json
-import sys
-
-import modal
-
-app = modal.App("profile-kernel-b200")
-image = (
-    modal.Image.from_registry(
-        "nvidia/cuda:12.8.0-devel-ubuntu22.04", add_python="3.11"
-    )
-    .pip_install("nvidia-cutlass-dsl==4.4.0", "torch")
-    .run_commands(
-        "apt-get update && apt-get install -y --no-install-recommends "
-        "nsight-systems-2025.5.2 nsight-compute-2025.4.0 "
-        "&& rm -rf /var/lib/apt/lists/*"
-    )
-)
-
-
-@app.function(image=image, gpu="{gpu}", timeout=1800)
-def profile_remote(kern_src: str, harness_src: str, cfg: dict) -> str:
-    """Runs inside Modal container.  Returns JSON string to avoid pickle issues."""
-    import glob
-    import json as _json
-    import os
-    import shutil
-    import subprocess as sp
-    import sys as _sys
-    import time
-    import traceback
-
-    def log(msg: str) -> None:
-        print(f"[PROFILE-REMOTE] {{msg}}", flush=True)
+def _run_remote(args: argparse.Namespace) -> dict[str, Any]:
+    """Execute profiling on Modal B200 via deployed ModalToolsRunner."""
+    if args.gpu != "B200":
+        raise SystemExit("profile_kernel.py remote mode is B200-only.")
 
     try:
-        log("=== Remote profiler function starting ===")
+        import modal
+    except Exception as e:
+        raise SystemExit(
+            "Modal is required for --remote. Install with: uv add modal"
+        ) from e
 
-        # -- Probe-only mode -----------------------------------------------
-        if cfg.get("probe_only"):
-            log("Probe mode: checking tool availability")
+    # Import lazily so local profiling does not require modal tool app modules.
+    from tools.modal_tools_app import APP_NAME as MODAL_APP_NAME
+    from tools.modal_tools_app import CLASS_NAME as MODAL_CLASS_NAME
 
-            def _find(name: str) -> str | None:
-                for pat in [
-                    f"/opt/nvidia/nsight-systems/*/bin/{{name}}",
-                    f"/opt/nvidia/nsight-compute/*/bin/{{name}}",
-                    f"/usr/local/cuda/bin/{{name}}",
-                    f"/usr/local/cuda/extras/compute-sanitizer/{{name}}",
-                    f"/usr/local/cuda/nsight-compute/ncu",
-                    f"/usr/local/cuda/nsight-systems/bin/nsys",
-                ]:
-                    for c in sorted(glob.glob(pat), reverse=True):
-                        if os.path.isfile(c) and os.access(c, os.X_OK):
-                            return c
-                p = shutil.which(name)
-                if p:
-                    return p
-                return None
-
-            tools = {{
-                "ncu": _find("ncu"),
-                "nsys": _find("nsys"),
-                "compute-sanitizer": _find("compute-sanitizer"),
-            }}
-            log(f"Tools found: {{tools}}")
-
-            try:
-                gpu_proc = sp.run(
-                    ["nvidia-smi", "--query-gpu=name,compute_cap,memory.total",
-                     "--format=csv,noheader,nounits"],
-                    capture_output=True, text=True, timeout=10,
-                )
-                gpu_raw = gpu_proc.stdout.strip()
-            except Exception:
-                gpu_raw = "nvidia-smi failed"
-
-            versions: dict[str, str] = {{"python": _sys.version}}
-            try:
-                import torch
-                versions["torch"] = torch.__version__
-                versions["cuda_available"] = str(torch.cuda.is_available())
-                if torch.cuda.is_available():
-                    versions["cuda_device"] = torch.cuda.get_device_name(0)
-            except Exception as e:
-                versions["torch_error"] = str(e)
-            try:
-                import cutlass
-                versions["cutlass"] = getattr(cutlass, "__version__", "unknown")
-            except Exception as e:
-                versions["cutlass_error"] = str(e)
-
-            log("Probe complete")
-            return _json.dumps({{
-                "probe": True,
-                "tools": tools,
-                "gpu_info_raw": gpu_raw,
-                "versions": versions,
-            }})
-
-        # -- Full profiling mode -------------------------------------------
-        log("Writing kernel and harness to /tmp")
-        with open("/tmp/kernel.py", "w") as f:
-            f.write(kern_src)
-        with open("/tmp/harness.py", "w") as f:
-            f.write(harness_src)
-
-        python = _sys.executable
-        mode = cfg["mode"]
-        timeout_ = min(cfg.get("timeout", 600), 900)
-
-        def _find(name: str) -> str | None:
-            for pat in [
-                f"/opt/nvidia/nsight-systems/*/bin/{{name}}",
-                f"/opt/nvidia/nsight-compute/*/bin/{{name}}",
-                f"/usr/local/cuda/bin/{{name}}",
-                f"/usr/local/cuda/extras/compute-sanitizer/{{name}}",
-                f"/usr/local/cuda/nsight-compute/ncu",
-                f"/usr/local/cuda/nsight-systems/bin/nsys",
-            ]:
-                for c in sorted(glob.glob(pat), reverse=True):
-                    if os.path.isfile(c) and os.access(c, os.X_OK):
-                        return c
-            p = shutil.which(name)
-            if p:
-                return p
-            return None
-
-        def _run(cmd: list[str], timeout_s: int = timeout_, label: str = "cmd") -> dict:
-            log(f"Running: {{' '.join(cmd[:6])}}... (timeout={{timeout_s}}s)")
-            t0 = time.time()
-            try:
-                proc = sp.run(cmd, capture_output=True, text=True, timeout=timeout_s)
-                elapsed = time.time() - t0
-                log(f"  {{label}} finished in {{elapsed:.1f}}s (rc={{proc.returncode}})")
-                return {{
-                    "returncode": proc.returncode,
-                    "stdout": proc.stdout[-100_000:],
-                    "stderr": proc.stderr[-20_000:],
-                    "elapsed_s": round(elapsed, 1),
-                }}
-            except sp.TimeoutExpired:
-                elapsed = time.time() - t0
-                log(f"  {{label}} TIMED OUT after {{elapsed:.1f}}s")
-                return {{"returncode": -1, "stdout": "", "stderr": f"{{label}} timed out after {{timeout_s}}s"}}
-            except Exception as e:
-                log(f"  {{label}} EXCEPTION: {{e}}")
-                return {{"returncode": -1, "stdout": "", "stderr": f"{{label}}: {{e}}"}}
-
-        result: dict = {{}}
-
-        if mode == "ncu":
-            ncu_bin = _find("ncu")
-            if not ncu_bin:
-                return _json.dumps({{"error": "ncu not found in container. Run --probe to check available tools."}})
-            log(f"Using ncu at: {{ncu_bin}}")
-            cmd = [ncu_bin, "--csv"]
-            cmd += cfg.get("ncu_section_args", ["--set", "basic"])
-            if cfg.get("nvtx"):
-                cmd += ["--nvtx", "--nvtx-include", "profile_region/"]
-            if cfg.get("launch_skip") is not None:
-                cmd += ["--launch-skip", str(cfg["launch_skip"])]
-            cmd += ["--launch-count", str(cfg.get("launch_count", 1))]
-            cmd += ["--target-processes", "all"]
-            if cfg.get("ncu_extra"):
-                cmd += cfg["ncu_extra"].split()
-            cmd += [python, "/tmp/harness.py"]
-            result["ncu_result"] = _run(cmd, label="ncu")
-            result["cmd"] = " ".join(cmd)
-
-        elif mode == "nsys":
-            nsys_bin = _find("nsys")
-            if not nsys_bin:
-                return _json.dumps({{"error": "nsys not found in container. Run --probe to check available tools."}})
-            log(f"Using nsys at: {{nsys_bin}}")
-            nsys_cfg_info = {{}}
-            z_res = _run([nsys_bin, "-z"], timeout_s=30, label="nsys -z")
-            cfg_path = ""
-            if z_res.get("returncode", -1) == 0:
-                lines = [ln.strip() for ln in (z_res.get("stdout", "") or "").splitlines() if ln.strip()]
-                if lines:
-                    cfg_path = lines[-1]
-            nsys_cfg_info["cfg_path"] = cfg_path
-            nsys_cfg_info["z_returncode"] = z_res.get("returncode")
-            nsys_cfg_info["z_stderr_tail"] = (z_res.get("stderr", "") or "")[-1000:]
-            if cfg_path:
-                try:
-                    cfg_parent = os.path.dirname(cfg_path)
-                    if cfg_parent:
-                        os.makedirs(cfg_parent, exist_ok=True)
-                    existing = ""
-                    if os.path.exists(cfg_path):
-                        with open(cfg_path, "r", encoding="utf-8", errors="ignore") as f:
-                            existing = f.read()
-                    if "CuptiUseRawGpuTimestamps=false" not in existing:
-                        with open(cfg_path, "a", encoding="utf-8") as f:
-                            if existing and not existing.endswith("\\n"):
-                                f.write("\\n")
-                            f.write("CuptiUseRawGpuTimestamps=false\\n")
-                    nsys_cfg_info["timestamp_workaround"] = "applied"
-                except Exception as e:
-                    nsys_cfg_info["timestamp_workaround"] = f"failed: {{type(e).__name__}}: {{e}}"
-            else:
-                nsys_cfg_info["timestamp_workaround"] = "skipped: nsys -z path unavailable"
-
-            cap_cmd = [
-                nsys_bin, "profile", "-o", "/tmp/prof_out",
-                "--force-overwrite", "true",
-                "--trace", "cuda,nvtx",
-                "--sample", "none", "--cpuctxsw", "none",
-            ]
-            if cfg.get("nvtx"):
-                cap_cmd += ["--nvtx-capture", "range@profile_region"]
-            cap_cmd += [python, "/tmp/harness.py"]
-            result["capture"] = _run(cap_cmd, label="nsys profile")
-            used_nvtx_only_fallback = False
-            if result["capture"].get("returncode", -1) == 0 and "Unrecognized GPU UUID" in (result["capture"].get("stderr", "") or ""):
-                cap_nvtx = [
-                    nsys_bin, "profile", "-o", "/tmp/prof_out_nvtx",
-                    "--force-overwrite", "true",
-                    "--trace", "nvtx",
-                    "--sample", "none", "--cpuctxsw", "none",
-                ]
-                if cfg.get("nvtx"):
-                    cap_nvtx += ["--nvtx-capture", "range@profile_region"]
-                cap_nvtx += [python, "/tmp/harness.py"]
-                cap2 = _run(cap_nvtx, label="nsys profile (nvtx fallback)")
-                if cap2.get("returncode", -1) == 0:
-                    result["capture"] = cap2
-                    used_nvtx_only_fallback = True
-
-            if result["capture"].get("returncode", -1) == 0:
-                out_prefix = "/tmp/prof_out_nvtx" if used_nvtx_only_fallback else "/tmp/prof_out"
-                all_outputs = sorted(glob.glob(out_prefix + "*"))
-                preferred = [
-                    p for p in all_outputs if p.endswith(".nsys-rep") or p.endswith(".qdrep")
-                ]
-                if preferred:
-                    rep = preferred[0]
-                elif all_outputs:
-                    rep = all_outputs[0]
-                else:
-                    rep = out_prefix + ".nsys-rep"
-                if used_nvtx_only_fallback:
-                    report_candidates = ["nvtx_sum"]
-                else:
-                    report_candidates = ["cuda_gpu_kern_sum", "cuda_api_sum", "nvtx_sum", "cuda_gpu_kernel_sum", "gpukernsum"]
-                stats_attempts: list[dict] = []
-                selected_report = None
-                stats_res = {{"returncode": -1, "stdout": "", "stderr": "nsys stats not attempted"}}
-                for report_name in report_candidates:
-                    stats_cmd = [
-                        nsys_bin, "stats", "--format", "csv", "--output", "-",
-                        "--force-export", "true",
-                        "--report", report_name, rep,
-                    ]
-                    attempt = _run(stats_cmd, timeout_s=60, label=f"nsys stats ({{report_name}})")
-                    stats_attempts.append({{
-                        "report": report_name,
-                        "cmd": " ".join(stats_cmd),
-                        "returncode": attempt.get("returncode"),
-                        "stdout_tail": (attempt.get("stdout", "") or "")[-1000:],
-                        "stderr_tail": (attempt.get("stderr", "") or "")[-1000:],
-                    }})
-                    stderr_txt = (attempt.get("stderr", "") or "").lower()
-                    stdout_txt = (attempt.get("stdout", "") or "")
-                    has_report_error = ("error: report" in stderr_txt) or ("could not be found" in stderr_txt)
-                    looks_csv = (("Time (%)" in stdout_txt) and ("," in stdout_txt)) or (("Kernel Name" in stdout_txt) and ("," in stdout_txt))
-                    if attempt.get("returncode", -1) == 0 and looks_csv and not has_report_error:
-                        selected_report = report_name
-                        stats_res = attempt
-                        break
-                    stats_res = attempt
-
-                result["stats"] = stats_res
-                result["report_file"] = rep
-                result["report_candidates"] = all_outputs
-                result["nsys_config"] = nsys_cfg_info
-                result["used_nvtx_only_fallback"] = used_nvtx_only_fallback
-                result["stats_selected_report"] = selected_report
-                result["stats_attempts"] = stats_attempts
-                if selected_report is None:
-                    result["help_reports"] = _run(
-                        [nsys_bin, "stats", "--help-reports"],
-                        timeout_s=60,
-                        label="nsys stats --help-reports",
-                    )
-            else:
-                result["stats"] = {{"returncode": -1, "stdout": "", "stderr": "skipped: capture failed"}}
-                result["nsys_config"] = nsys_cfg_info
-
-        elif mode == "sanitizer":
-            san_bin = _find("compute-sanitizer")
-            if not san_bin:
-                return _json.dumps({{"error": "compute-sanitizer not found in container. Run --probe to check available tools."}})
-            log(f"Using compute-sanitizer at: {{san_bin}}")
-            san_tool = cfg.get("sanitizer_tool", "memcheck")
-            cmd = [san_bin, "--tool", san_tool, python, "/tmp/harness.py"]
-            result["sanitizer_result"] = _run(cmd, label="compute-sanitizer")
-            result["cmd"] = " ".join(cmd)
-
-        # GPU info
-        log("Collecting GPU info...")
-        try:
-            gpu_proc = sp.run(
-                ["nvidia-smi",
-                 "--query-gpu=name,compute_cap,memory.total,clocks.sm,clocks.mem,"
-                 "driver_version,pci.bus_id",
-                 "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=10,
-            )
-            result["gpu_info_raw"] = gpu_proc.stdout.strip()
-        except Exception:
-            result["gpu_info_raw"] = ""
-
-        log("=== Remote profiler function complete ===")
-        return _json.dumps(result)
-
-    except Exception:
-        tb = traceback.format_exc()
-        print(f"[PROFILE-REMOTE] FATAL: {{tb}}", flush=True)
-        return _json.dumps({{"error": f"Remote function crashed:\\n{{tb}}"}})
-
-
-@app.local_entrypoint()
-def main(config_json: str, kernel_file: str, harness_file: str = ""):
-    with open(config_json) as f:
-        cfg = json.load(f)
-
-    kern_src = ""
-    if kernel_file and kernel_file != "__probe__":
-        with open(kernel_file) as f:
-            kern_src = f.read()
-
-    harness_src = ""
-    if harness_file:
-        with open(harness_file) as f:
-            harness_src = f.read()
-
-    result_json = profile_remote.remote(kern_src, harness_src, cfg)
-
-    # Output JSON on a line prefixed with RESULT_JSON: for easy parsing.
-    # result_json is already a JSON string from the remote function.
-    print("RESULT_JSON:" + result_json)
-'''
-
-
-def _run_remote(args: argparse.Namespace) -> dict[str, Any]:
-    """Execute profiling on Modal B200 via ``modal run``.
-
-    Generates a self-contained Modal script in a temp directory, invokes it
-    with ``modal run``, and parses the JSON result from stdout.  This avoids
-    the ``app.run()`` programmatic API which hangs with modal 1.3.x.
-    """
     kernel_path = os.path.abspath(args.kernel)
     if not os.path.isfile(kernel_path):
         raise SystemExit(f"[ERROR] Kernel file not found: {kernel_path}")
 
     problem_sizes = _parse_problem_sizes(args.problem_sizes)
     ncu_section_args = _resolve_ncu_section_args(args.ncu_set)
+    remote_config: dict[str, Any] = {
+        "mode": args.mode,
+        "problem_sizes": problem_sizes,
+        "warmup_iters": args.warmup,
+        "profile_iters": args.profile_iters,
+        "nvtx": args.nvtx,
+        "timeout": args.timeout,
+        "ncu_section_args": ncu_section_args,
+        "ncu_set": args.ncu_set,
+        "launch_skip": args.launch_skip,
+        "launch_count": args.launch_count,
+        "ncu_extra": args.ncu_extra,
+        "sanitizer_tool": args.sanitizer_tool,
+    }
+    if args.probe:
+        remote_config["probe_only"] = True
 
-    with tempfile.TemporaryDirectory(prefix="profile_remote_") as tmpdir:
-        # Write the Modal runner script.
-        runner_path = os.path.join(tmpdir, "modal_runner.py")
-        with open(runner_path, "w") as f:
-            f.write(_generate_modal_runner(gpu=args.gpu, probe_only=args.probe))
+    # Stage a minimal self-contained toolset into the remote runner.
+    tools_dir = Path(__file__).resolve().parent
+    files_b64: dict[str, str] = {
+        "config.json": base64.b64encode(
+            json.dumps(remote_config, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii"),
+        "tools/__init__.py": base64.b64encode(
+            (tools_dir / "__init__.py").read_bytes()
+        ).decode("ascii"),
+        "tools/profile_kernel.py": base64.b64encode(
+            (tools_dir / "profile_kernel.py").read_bytes()
+        ).decode("ascii"),
+        "tools/profile_parsers.py": base64.b64encode(
+            (tools_dir / "profile_parsers.py").read_bytes()
+        ).decode("ascii"),
+        "tools/profile_analysis.py": base64.b64encode(
+            (tools_dir / "profile_analysis.py").read_bytes()
+        ).decode("ascii"),
+    }
+    if not args.probe:
+        files_b64["kernel.py"] = base64.b64encode(Path(kernel_path).read_bytes()).decode(
+            "ascii"
+        )
 
-        # Write config JSON.
-        remote_config: dict[str, Any] = {
-            "mode": args.mode,
-            "problem_sizes": problem_sizes,
-            "warmup_iters": args.warmup,
-            "profile_iters": args.profile_iters,
-            "nvtx": args.nvtx,
-            "timeout": args.timeout,
-            "ncu_section_args": ncu_section_args,
-            "launch_skip": args.launch_skip,
-            "launch_count": args.launch_count,
-            "ncu_extra": args.ncu_extra,
-            "sanitizer_tool": args.sanitizer_tool,
-        }
-        if args.probe:
-            remote_config["probe_only"] = True
+    remote_snippet = r'''
+import json
+import os
+import sys
+import types
+from pathlib import Path
 
-        config_path = os.path.join(tmpdir, "config.json")
-        with open(config_path, "w") as f:
-            json.dump(remote_config, f)
+stage = Path(os.environ["MODAL_STAGE_DIR"])
+sys.path.insert(0, str(stage))
 
-        # Write harness (for non-probe).
-        harness_path = ""
-        if not args.probe:
-            harness_src = _generate_harness(
-                "/tmp/kernel.py", problem_sizes,
-                args.warmup, args.profile_iters, args.nvtx,
-            )
-            harness_path = os.path.join(tmpdir, "harness.py")
-            with open(harness_path, "w") as f:
-                f.write(harness_src)
+from tools import profile_kernel as pk
 
-        # Build modal run command.
-        cmd = [
-            sys.executable, "-m", "modal", "run", runner_path,
-            "--config-json", config_path,
-            "--kernel-file", kernel_path if not args.probe else "__probe__",
-        ]
-        if harness_path:
-            cmd += ["--harness-file", harness_path]
+cfg = json.loads((stage / "config.json").read_text(encoding="utf-8"))
 
-        if args.probe:
-            print(f"[INFO] Probing tool availability on Modal {args.gpu}...")
-        else:
-            print(f"[INFO] Launching {args.mode} profile on Modal {args.gpu}...")
-            print(f"[INFO] Problem sizes: {problem_sizes}")
-        print("[INFO] (First run builds image -- may take a few minutes)")
+if bool(cfg.get("probe_only", False)):
+    def _probe_find(name: str) -> str | None:
+        return pk._find_tool(name)
 
-        # Run via subprocess to use the reliable `modal run` CLI path.
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=args.timeout + 300,  # Extra margin for image build.
-            )
-        except subprocess.TimeoutExpired:
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "mode": args.mode,
-                "kernel": {"name": Path(kernel_path).stem, "path": args.kernel},
-                "error": "modal run timed out",
+    tools = {
+        "ncu": _probe_find("ncu"),
+        "nsys": _probe_find("nsys"),
+        "compute-sanitizer": _probe_find("compute-sanitizer"),
+    }
+
+    versions: dict[str, str] = {"python": sys.version}
+    try:
+        import torch
+        versions["torch"] = torch.__version__
+        versions["cuda_available"] = str(torch.cuda.is_available())
+        if torch.cuda.is_available():
+            versions["cuda_device"] = torch.cuda.get_device_name(0)
+    except Exception as e:
+        versions["torch_error"] = str(e)
+
+    try:
+        import cutlass
+        versions["cutlass"] = getattr(cutlass, "__version__", "unknown")
+    except Exception as e:
+        versions["cutlass_error"] = str(e)
+
+    try:
+        import subprocess
+        gpu_proc = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,compute_cap,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        gpu_raw = gpu_proc.stdout.strip()
+    except Exception:
+        gpu_raw = "nvidia-smi failed"
+
+    out = {
+        "probe": True,
+        "tools": tools,
+        "gpu_info_raw": gpu_raw,
+        "versions": versions,
+    }
+    print("RESULT_JSON:" + json.dumps(out))
+    raise SystemExit(0)
+
+problem_sizes = cfg.get("problem_sizes", [])
+problem_sizes_str = ";".join(
+    ",".join(str(int(v)) for v in grp)
+    for grp in problem_sizes
+)
+
+args = types.SimpleNamespace(
+    kernel=str(stage / "kernel.py"),
+    mode=str(cfg.get("mode", "ncu")),
+    problem_sizes=problem_sizes_str,
+    warmup=int(cfg.get("warmup_iters", 3)),
+    profile_iters=int(cfg.get("profile_iters", 1)),
+    timeout=int(cfg.get("timeout", 600)),
+    python_exe=sys.executable,
+    nvtx=bool(cfg.get("nvtx", True)),
+    ncu_set=str(cfg.get("ncu_set", "basic")),
+    launch_skip=cfg.get("launch_skip"),
+    launch_count=int(cfg.get("launch_count", 1)),
+    ncu_extra=cfg.get("ncu_extra"),
+    sanitizer_tool=str(cfg.get("sanitizer_tool", "memcheck")),
+)
+
+out = pk._run_local(args)
+print("RESULT_JSON:" + json.dumps(out))
+'''
+
+    if args.probe:
+        print(f"[INFO] Probing tool availability on deployed Modal {args.gpu}...")
+    else:
+        print(f"[INFO] Launching {args.mode} profile on deployed Modal {args.gpu}...")
+        print(f"[INFO] Problem sizes: {problem_sizes}")
+
+    cls = modal.Cls.from_name(MODAL_APP_NAME, MODAL_CLASS_NAME)
+    runner = cls()
+    remote_exec = runner.run_python.remote(
+        snippet_source=remote_snippet,
+        files_b64=files_b64,
+        profile="final",
+        timeout_seconds=max(120, int(args.timeout) + 120),
+    )
+
+    # Parse RESULT_JSON: line from remote stdout.
+    raw: dict[str, Any] = {}
+    stdout = str(remote_exec.get("stdout", "") or "")
+    stderr = str(remote_exec.get("stderr", "") or "")
+    exit_code = int(remote_exec.get("exit_code", 1))
+
+    if stderr:
+        for line in stderr.strip().splitlines():
+            print(f"  [modal-tools] {line}")
+
+    for line in stdout.splitlines():
+        if line.startswith("RESULT_JSON:"):
+            try:
+                raw = json.loads(line[len("RESULT_JSON:"):])
+            except json.JSONDecodeError as e:
+                raw = {"error": f"JSON decode failed: {e}", "raw_line": line[:2000]}
+            break
+    else:
+        if exit_code != 0:
+            raw = {
+                "error": f"remote runner exited {exit_code}",
+                "stdout_tail": stdout[-3000:],
+                "stderr_tail": stderr[-3000:],
             }
-
-        # Print Modal CLI output (progress messages go to stderr).
-        if proc.stderr:
-            for line in proc.stderr.strip().splitlines():
-                print(f"  [modal] {line}")
-
-        # Parse RESULT_JSON: line from stdout.
-        raw: dict[str, Any] = {}
-        for line in proc.stdout.splitlines():
-            if line.startswith("RESULT_JSON:"):
-                try:
-                    raw = json.loads(line[len("RESULT_JSON:"):])
-                except json.JSONDecodeError as e:
-                    raw = {"error": f"JSON decode failed: {e}", "raw_line": line[:2000]}
-                break
         else:
-            if proc.returncode != 0:
-                raw = {
-                    "error": f"modal run exited {proc.returncode}",
-                    "stdout_tail": proc.stdout[-3000:],
-                    "stderr_tail": proc.stderr[-3000:],
-                }
-            else:
-                raw = {
-                    "error": "No RESULT_JSON line in modal output",
-                    "stdout_tail": proc.stdout[-3000:],
-                }
+            raw = {
+                "error": "No RESULT_JSON line in remote output",
+                "stdout_tail": stdout[-3000:],
+            }
 
     # -- Probe mode: just print and exit -----------------------------------
     if args.probe:

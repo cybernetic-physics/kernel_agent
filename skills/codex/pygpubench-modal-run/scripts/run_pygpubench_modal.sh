@@ -11,4 +11,10 @@ if [[ -f ".env" ]]; then
   set +a
 fi
 
-uv run --with modal python -m modal run tools/run_pygpubench_modal.py "$@"
+if [[ "${1:-}" == "--deploy" ]]; then
+  shift
+  uv run --with modal modal deploy tools/pygpubench_modal_app.py "$@"
+  exit 0
+fi
+
+uv run --with modal python tools/run_pygpubench_modal.py "$@"

@@ -12,10 +12,13 @@ import argparse
 import base64
 import json
 import os
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+import modal
+
+from modal_tools_app import APP_NAME as MODAL_APP_NAME
+from modal_tools_app import CLASS_NAME as MODAL_CLASS_NAME
 
 BEGIN_MARKER = "__PTX_DUMP_JSON_BEGIN__"
 END_MARKER = "__PTX_DUMP_JSON_END__"
@@ -64,6 +67,18 @@ def _parse_args() -> argparse.Namespace:
         help=f"Repo root (default: {default_repo})",
     )
     p.add_argument("--gpu", default="B200", help="Modal GPU type (default: B200).")
+    p.add_argument(
+        "--profile",
+        default="candidate",
+        choices=["smoke", "candidate", "final"],
+        help="Deployed runner profile (default: candidate).",
+    )
+    p.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=None,
+        help="Override snippet timeout inside deployed runner.",
+    )
     p.add_argument(
         "--out",
         type=Path,
@@ -151,7 +166,15 @@ print(
     file=sys.stderr,
 )
 
-kernel_path = pathlib.Path("/workspace/repo") / kernel_rel
+# Kernels in this repo may import task.input_t/output_t.
+import types  # noqa: E402
+task_mod = types.ModuleType("task")
+task_mod.input_t = tuple
+task_mod.output_t = list
+sys.modules.setdefault("task", task_mod)
+
+stage_root = pathlib.Path(os.environ.get("MODAL_STAGE_DIR", "."))
+kernel_path = stage_root / "repo" / kernel_rel
 if not kernel_path.exists():
     raise RuntimeError(f"Kernel file not found: {{kernel_path}}")
 
@@ -265,43 +288,28 @@ def main() -> None:
         keep_cubin=args.keep_cubin,
     )
 
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
-        tf.write(snippet)
-        code_file = Path(tf.name)
+    if args.gpu != "B200":
+        raise SystemExit("dump_ptx_modal.py is B200-only with deployed modal tools.")
 
-    cmd = [
-        "uv",
-        "run",
-        "--with",
-        "modal",
-        "python",
-        "tools/modal_python_exec.py",
-        "--gpu",
-        args.gpu,
-        "--mount-repo",
-        "--code-file",
-        str(code_file),
-    ]
+    runner = modal.Cls.from_name(MODAL_APP_NAME, MODAL_CLASS_NAME)()
+    files_b64 = {
+        f"repo/{kernel_rel}": base64.b64encode(kernel_abs.read_bytes()).decode("ascii")
+    }
+    remote = runner.run_python.remote(
+        snippet_source=snippet,
+        files_b64=files_b64,
+        profile=args.profile,
+        timeout_seconds=args.timeout_seconds,
+    )
 
-    try:
-        if args.verbose:
-            print("Running:", " ".join(cmd), file=sys.stderr)
-        proc = subprocess.run(
-            cmd,
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-        )
-    finally:
-        code_file.unlink(missing_ok=True)
+    if args.verbose and remote.get("stderr"):
+        print(remote["stderr"], file=sys.stderr, end="")
+    if int(remote.get("exit_code", 1)) != 0:
+        if remote.get("stderr"):
+            print(remote["stderr"], file=sys.stderr, end="")
+        raise SystemExit(int(remote.get("exit_code", 1)))
 
-    if args.verbose and proc.stderr:
-        print(proc.stderr, file=sys.stderr, end="")
-    if proc.returncode != 0:
-        print(proc.stderr, file=sys.stderr, end="")
-        raise SystemExit(proc.returncode)
-
-    payload = _extract_payload(proc.stdout)
+    payload = _extract_payload(str(remote.get("stdout", "")))
     ptx_written = _write_b64_items(payload.get("ptx_files", []), out_dir)
     cubin_written = _write_b64_items(payload.get("cubin_files", []), out_dir)
 

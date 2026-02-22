@@ -10,11 +10,14 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
+
+import modal
+
+from modal_tools_app import APP_NAME as MODAL_APP_NAME
+from modal_tools_app import CLASS_NAME as MODAL_CLASS_NAME
 
 BEGIN_MARKER = "__NV_DISASM_JSON_BEGIN__"
 END_MARKER = "__NV_DISASM_JSON_END__"
@@ -35,6 +38,18 @@ def _parse_args() -> argparse.Namespace:
         help=f"Repo root for resolving relative paths (default: {default_repo})",
     )
     p.add_argument("--gpu", default="B200", help="Modal GPU type (default: B200).")
+    p.add_argument(
+        "--profile",
+        default="candidate",
+        choices=["smoke", "candidate", "final"],
+        help="Deployed runner profile (default: candidate).",
+    )
+    p.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=None,
+        help="Override snippet timeout inside deployed runner.",
+    )
     p.add_argument(
         "--nvdisasm-args",
         default="-g -hex -c",
@@ -112,7 +127,8 @@ nvdisasm = shutil.which("nvdisasm") or "/usr/local/cuda/bin/nvdisasm"
 if not os.path.exists(nvdisasm):
     raise RuntimeError("nvdisasm not found in Modal container.")
 
-base_dir = pathlib.Path("/workspace/cubin_in")
+stage_root = pathlib.Path(os.environ.get("MODAL_STAGE_DIR", "."))
+base_dir = stage_root / "cubin_in"
 result = {{
     "status": "ok",
     "nvdisasm": nvdisasm,
@@ -179,50 +195,40 @@ def main() -> None:
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.gpu != "B200":
+        raise SystemExit("disassemble_cubin_modal.py is B200-only with deployed modal tools.")
+
     snippet = _make_remote_snippet(
         filenames=filenames,
         nvdisasm_args=args.nvdisasm_args,
     )
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
-        tf.write(snippet)
-        code_file = Path(tf.name)
+    files_b64: dict[str, str] = {}
+    for name in filenames:
+        src = mount_dir / name
+        files_b64[f"cubin_in/{name}"] = base64.b64encode(src.read_bytes()).decode("ascii")
 
-    cmd = [
-        "uv",
-        "run",
-        "--with",
-        "modal",
-        "python",
-        "tools/modal_python_exec.py",
-        "--gpu",
-        args.gpu,
-        "--mount-local-dir",
-        f"{mount_dir}:/workspace/cubin_in",
-        "--allow-nonzero",
-        "--code-file",
-        str(code_file),
-    ]
-
-    try:
-        if args.verbose:
-            print("Running:", " ".join(cmd), file=sys.stderr)
-        proc = subprocess.run(
-            cmd,
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
+    runner = modal.Cls.from_name(MODAL_APP_NAME, MODAL_CLASS_NAME)()
+    if args.verbose:
+        print(
+            f"Running deployed modal tools app={MODAL_APP_NAME} class={MODAL_CLASS_NAME} "
+            f"profile={args.profile}",
+            file=sys.stderr,
         )
-    finally:
-        code_file.unlink(missing_ok=True)
+    remote = runner.run_python.remote(
+        snippet_source=snippet,
+        files_b64=files_b64,
+        profile=args.profile,
+        timeout_seconds=args.timeout_seconds,
+    )
 
     stdout_log = out_dir / "modal_stdout.log"
     stderr_log = out_dir / "modal_stderr.log"
-    stdout_log.write_text(proc.stdout or "", encoding="utf-8")
-    stderr_log.write_text(proc.stderr or "", encoding="utf-8")
+    stdout_log.write_text(str(remote.get("stdout", "") or ""), encoding="utf-8")
+    stderr_log.write_text(str(remote.get("stderr", "") or ""), encoding="utf-8")
 
     payload: dict[str, Any]
     try:
-        payload = _extract_payload(proc.stdout or "")
+        payload = _extract_payload(str(remote.get("stdout", "") or ""))
     except Exception as exc:
         raise SystemExit(
             f"Failed to extract disassembly payload: {exc}\n"
@@ -248,7 +254,8 @@ def main() -> None:
         "nvdisasm": payload.get("nvdisasm"),
         "input_dir": str(mount_dir),
         "out_dir": str(out_dir),
-        "modal_returncode": proc.returncode,
+        "modal_returncode": int(remote.get("exit_code", 1)),
+        "modal_timed_out": bool(remote.get("timed_out", False)),
         "modal_stdout_log": str(stdout_log),
         "modal_stderr_log": str(stderr_log),
         "files": results,

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Run internal layout tuple dump on Modal B200 and print/write JSON."""
+"""Run internal layout tuple dump on deployed Modal B200 and print/write JSON.
+
+Deploy once:
+    uv run --with modal modal deploy tools/dump_internal_layout_tuples_modal_b200.py
+Then run repeatedly without `modal run`:
+    uv run --with modal python tools/dump_internal_layout_tuples_modal_b200.py
+"""
 
 from __future__ import annotations
 
@@ -12,11 +18,14 @@ import modal
 
 APP_NAME = "nvfp4-layout-tuples-b200"
 DEFAULT_IMAGE = "nvidia/cuda:12.8.0-devel-ubuntu22.04"
+CACHE_VOLUME_NAME = "modal-tools-cache-v1"
+CACHE_MOUNT_PATH = "/cache"
 
 app = modal.App(APP_NAME)
 image = modal.Image.from_registry(DEFAULT_IMAGE, add_python="3.11").pip_install(
     "nvidia-cutlass-dsl==4.4.0"
 )
+cache_volume = modal.Volume.from_name(CACHE_VOLUME_NAME, create_if_missing=True)
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -47,6 +56,16 @@ def _parse_args() -> argparse.Namespace:
         help="Run all context probe modes instead of only the stable with_module_ip mode.",
     )
     p.add_argument("--gpu", default="B200")
+    p.add_argument(
+        "--app-name",
+        default=APP_NAME,
+        help=f"Deployed Modal app name (default: {APP_NAME}).",
+    )
+    p.add_argument(
+        "--function-name",
+        default="_dump_remote",
+        help="Deployed Modal function name (default: _dump_remote).",
+    )
     p.add_argument("--json-out", type=Path)
     # Modal CLI can inject its own argv fragments into local entrypoints.
     args, _unknown = p.parse_known_args()
@@ -643,7 +662,12 @@ else:
 """
 
 
-@app.function(image=image, gpu="B200", timeout=900)
+@app.function(
+    image=image,
+    gpu="B200",
+    timeout=900,
+    volumes={CACHE_MOUNT_PATH: cache_volume},
+)
 def _dump_remote(cfg: dict[str, object]) -> dict[str, object]:
     import os
     import subprocess
@@ -653,6 +677,10 @@ def _dump_remote(cfg: dict[str, object]) -> dict[str, object]:
     env["NVFP4_LAYOUT_CFG"] = json.dumps(cfg)
     # Work around allocator aborts seen with CUTLASS DSL in some container setups.
     env.setdefault("GLIBC_TUNABLES", "glibc.malloc.tcache_count=0")
+    env.setdefault("XDG_CACHE_HOME", f"{CACHE_MOUNT_PATH}/xdg")
+    env.setdefault("TORCHINDUCTOR_CACHE_DIR", f"{CACHE_MOUNT_PATH}/torchinductor")
+    env.setdefault("TRITON_CACHE_DIR", f"{CACHE_MOUNT_PATH}/triton")
+    env.setdefault("CUDA_CACHE_PATH", f"{CACHE_MOUNT_PATH}/cuda")
 
     attempts: list[dict[str, object]] = []
     if bool(cfg.get("probe_modes", False)):
@@ -704,9 +732,11 @@ def _dump_remote(cfg: dict[str, object]) -> dict[str, object]:
     return {"ok": False, "attempts": attempts}
 
 
-@app.local_entrypoint()
 def main() -> None:
     args = _parse_args()
+    if args.gpu != "B200":
+        raise SystemExit("dump_internal_layout_tuples_modal_b200.py is B200-only.")
+
     mma_tiler = [int(x.strip()) for x in args.mma_tiler.split(",")]
     shape = [int(x.strip()) for x in args.shape.split(",")]
 
@@ -726,7 +756,8 @@ def main() -> None:
         "probe_modes": bool(args.probe_modes),
     }
 
-    result = _dump_remote.remote(cfg)
+    remote_fn = modal.Function.from_name(args.app_name, args.function_name)
+    result = remote_fn.remote(cfg)
 
     text = json.dumps(result, indent=2)
     if args.json_out:
@@ -735,3 +766,7 @@ def main() -> None:
         print(f"[INFO] Wrote: {args.json_out}")
 
     print(text)
+
+
+if __name__ == "__main__":
+    main()

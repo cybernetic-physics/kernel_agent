@@ -20,9 +20,11 @@ set -a; source .env; set +a
 ## Common workflows
 
 1. Collect B200 internal layout dump:
-   - `uv run --with modal modal run tools/dump_internal_layout_tuples_modal_b200.py`
+   - `uv run --with modal modal deploy tools/dump_internal_layout_tuples_modal_b200.py`
+   - `uv run --with modal python tools/dump_internal_layout_tuples_modal_b200.py`
 2. Collect B200 epilogue TMEM->register dump:
-   - `uv run --with modal modal run tools/dump_epilogue_t2r_layouts_modal_b200.py`
+   - `uv run --with modal modal deploy tools/dump_epilogue_t2r_layouts_modal_b200.py`
+   - `uv run --with modal python tools/dump_epilogue_t2r_layouts_modal_b200.py`
 3. Fold both dumps into tract report:
    - `uv run python tools/tract_dump_insights.py --dump-json artifacts/wagmiv67_b200_dump.json --t2r-json artifacts/wagmiv67_t2r_layouts.json --json-out artifacts/wagmiv67_tract_insights.json`
 4. Snapshot/diff layout regressions:
@@ -34,7 +36,8 @@ set -a; source .env; set +a
    - `uv run python tools/profile_kernel.py --kernel kernels/nvfp4_group_gemm/wagmiv67.py --mode sanitizer --json-out artifacts/profile_sanitizer.json`
    - Remote (Modal B200): add `--remote --gpu B200`
 6. Run a CUTLASS execution smoke example on Modal B200:
-   - `uv run --with modal modal run tools/cutlass_execution_modal_b200_example.py`
+   - `uv run --with modal modal deploy tools/cutlass_execution_modal_b200_example.py`
+   - `uv run --with modal python tools/cutlass_execution_modal_b200_example.py`
 7. Execute arbitrary Python snippets on Modal B200 (Codex-friendly):
    - `uv run --with modal python tools/modal_python_exec.py --code "import torch; print(torch.__version__)"`
    - `cat <<'PY' | uv run --with modal python tools/modal_python_exec.py`
@@ -76,7 +79,8 @@ set -a; source .env; set +a
 - Needs: Modal + B200.
 - Stable default: runs only `with_module_ip`.
 - Example:
-  - `uv run --with modal modal run tools/dump_internal_layout_tuples_modal_b200.py`
+  - `uv run --with modal modal deploy tools/dump_internal_layout_tuples_modal_b200.py`
+  - `uv run --with modal python tools/dump_internal_layout_tuples_modal_b200.py`
 - Optional env toggles:
   - `NVFP4_PROBE_MODES=1` to run all context probe modes.
   - `NVFP4_TRY_CPASYNC_PARTITION=1` to best-effort call `cpasync.tma_partition`.
@@ -88,7 +92,8 @@ set -a; source .env; set +a
   - `tDgC.layout`
 - Needs: Modal + B200.
 - Example:
-  - `uv run --with modal modal run tools/dump_epilogue_t2r_layouts_modal_b200.py`
+  - `uv run --with modal modal deploy tools/dump_epilogue_t2r_layouts_modal_b200.py`
+  - `uv run --with modal python tools/dump_epilogue_t2r_layouts_modal_b200.py`
 
 ### `tract_dump_insights.py`
 - What it does: offline tract-style analysis over dumped layout JSON.
@@ -155,8 +160,8 @@ set -a; source .env; set +a
   (memory_bound/compute_bound/latency_bound/occupancy_limited), optimisation hints, raw profiler
   sections, and stall breakdown.
 - Remote B200 notes:
-  - Use `python tools/profile_kernel.py --remote ...`; this script uses a generated `modal run` wrapper.
-  - First remote invocation can be much slower due container/image cold start.
+  - Use `python tools/profile_kernel.py --remote ...`; this path uses deployed `ModalToolsRunner`.
+  - Deploy once for best latency: `uv run --with modal modal deploy tools/modal_tools_app.py`.
   - `--gpu B200` is recommended to keep leaderboard parity.
   - `nsys` is the currently working remote path; if CUDA event parsing fails (`Unrecognized GPU UUID`),
     the tool automatically retries NVTX-only trace mode and parses `nvtx_sum`.
@@ -223,7 +228,8 @@ set -a; source .env; set +a
 - What it does: runs a real CUTLASS DSL kernel (`custom_kernel(...)`) on Modal B200 and reports latency + output sanity checks.
 - Default kernel: `kernels/nvfp4_group_gemm/wagmiv67.py`.
 - Example:
-  - `uv run --with modal modal run tools/cutlass_execution_modal_b200_example.py`
+  - `uv run --with modal modal deploy tools/cutlass_execution_modal_b200_example.py`
+  - `uv run --with modal python tools/cutlass_execution_modal_b200_example.py`
   - Custom kernel path: `--kernel kernels/nvfp4_group_gemm/wagmiv67.py`
   - Custom shapes: `--problem-sizes '80,4096,7168,1;40,7168,2048,1'`
   - Control timing: `--warmup 2 --iters 5`

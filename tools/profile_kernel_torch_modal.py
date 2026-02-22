@@ -9,11 +9,15 @@ the runtime. It captures per-kernel CUDA time aggregates from
 from __future__ import annotations
 
 import argparse
+import base64
 import json
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
+
+import modal
+
+from modal_tools_app import APP_NAME as MODAL_APP_NAME
+from modal_tools_app import CLASS_NAME as MODAL_CLASS_NAME
 
 BEGIN_MARKER = "__TORCH_PROFILER_MODAL_JSON_BEGIN__"
 END_MARKER = "__TORCH_PROFILER_MODAL_JSON_END__"
@@ -58,6 +62,18 @@ def _parse_args() -> argparse.Namespace:
         help=f"Repo root (default: {default_repo})",
     )
     p.add_argument("--gpu", default="B200", help="Modal GPU type (default: B200).")
+    p.add_argument(
+        "--profile",
+        default="candidate",
+        choices=["smoke", "candidate", "final"],
+        help="Deployed runner profile (default: candidate).",
+    )
+    p.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=None,
+        help="Override snippet timeout inside deployed runner.",
+    )
     p.add_argument("--warmup", type=int, default=2, help="Warmup iterations (default: 2).")
     p.add_argument(
         "--profile-iters",
@@ -111,6 +127,7 @@ def _make_remote_snippet(
     return f"""
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 
@@ -132,7 +149,15 @@ print(
     file=sys.stderr,
 )
 
-kernel_path = pathlib.Path("/workspace/repo") / kernel_rel
+# Kernels in this repo may import task.input_t/output_t.
+import types  # noqa: E402
+task_mod = types.ModuleType("task")
+task_mod.input_t = tuple
+task_mod.output_t = list
+sys.modules.setdefault("task", task_mod)
+
+stage_root = pathlib.Path(os.environ.get("MODAL_STAGE_DIR", "."))
+kernel_path = stage_root / "repo" / kernel_rel
 if not kernel_path.exists():
     raise RuntimeError(f"Kernel file not found: {{kernel_path}}")
 
@@ -251,46 +276,35 @@ def main() -> None:
         profile_iters=args.profile_iters,
         top_k=args.top_k,
     )
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
-        tf.write(snippet)
-        code_file = Path(tf.name)
+    if args.gpu != "B200":
+        raise SystemExit("profile_kernel_torch_modal.py is B200-only with deployed modal tools.")
 
-    cmd = [
-        "uv",
-        "run",
-        "--with",
-        "modal",
-        "python",
-        "tools/modal_python_exec.py",
-        "--gpu",
-        args.gpu,
-        "--mount-repo",
-        "--allow-nonzero",
-        "--code-file",
-        str(code_file),
-    ]
-
-    try:
-        if args.verbose:
-            print("Running:", " ".join(cmd))
-        proc = subprocess.run(
-            cmd,
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
+    runner = modal.Cls.from_name(MODAL_APP_NAME, MODAL_CLASS_NAME)()
+    files_b64 = {
+        f"repo/{kernel_rel}": base64.b64encode(kernel_abs.read_bytes()).decode("ascii")
+    }
+    if args.verbose:
+        print(
+            f"Running deployed modal tools app={MODAL_APP_NAME} class={MODAL_CLASS_NAME} "
+            f"profile={args.profile}"
         )
-    finally:
-        code_file.unlink(missing_ok=True)
+    remote = runner.run_python.remote(
+        snippet_source=snippet,
+        files_b64=files_b64,
+        profile=args.profile,
+        timeout_seconds=args.timeout_seconds,
+    )
 
     stdout_log = out_dir / "modal_stdout.log"
     stderr_log = out_dir / "modal_stderr.log"
-    stdout_log.write_text(proc.stdout or "", encoding="utf-8")
-    stderr_log.write_text(proc.stderr or "", encoding="utf-8")
+    stdout_log.write_text(str(remote.get("stdout", "") or ""), encoding="utf-8")
+    stderr_log.write_text(str(remote.get("stderr", "") or ""), encoding="utf-8")
 
-    payload = _extract_payload(proc.stdout or "")
+    payload = _extract_payload(str(remote.get("stdout", "") or ""))
     payload["gpu"] = args.gpu
     payload["kernel"] = kernel_rel
-    payload["modal_returncode"] = proc.returncode
+    payload["modal_returncode"] = int(remote.get("exit_code", 1))
+    payload["modal_timed_out"] = bool(remote.get("timed_out", False))
     payload["modal_stdout_log"] = str(stdout_log)
     payload["modal_stderr_log"] = str(stderr_log)
     payload["artifacts_dir"] = str(out_dir)

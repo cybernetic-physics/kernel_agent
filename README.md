@@ -36,6 +36,8 @@ Any Python/CUTLASS/GPU snippet should run on Modal B200:
 
 ```bash
 set -a; source .env; set +a
+# deploy once (or after tools/modal_tools_app.py changes)
+uv run --with modal modal deploy tools/modal_tools_app.py
 uv run --with modal python tools/modal_python_exec.py --gpu B200 --mount-repo --code "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
@@ -45,3 +47,15 @@ uv run --with modal python tools/modal_python_exec.py --gpu B200 --mount-repo --
 - `tools/dump_ptx_modal.py`: extract PTX for a kernel on Modal.
 - `tools/disassemble_cubin_modal.py`: disassemble CUBIN/SASS on Modal.
 - `tools/debug_cutlass_compile_modal.py`: gather detailed CUTLASS compile diagnostics on Modal.
+
+## Skills Compatibility (Codex + Claude Code)
+- Canonical skills live in `skills/codex/`.
+- Claude Code project discovery uses `.claude/skills/`.
+- This repo keeps `.claude/skills/*` as symlinks to `skills/codex/*` so both agents use the same skill definitions.
+- Resync links after skill changes:
+
+```bash
+bash tools/sync_claude_skills.sh
+```
+
+See `docs/SKILLS_CROSS_AGENT_COMPAT.md` for details and references.

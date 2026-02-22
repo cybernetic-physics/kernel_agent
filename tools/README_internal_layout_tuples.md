@@ -43,13 +43,14 @@ This mode is called `with_module_ip` in the script and is the stable path used t
 
 ```bash
 set -a; source .env; set +a
-uv run --with modal modal run tools/dump_internal_layout_tuples_modal_b200.py
+uv run --with modal modal deploy tools/dump_internal_layout_tuples_modal_b200.py
+uv run --with modal python tools/dump_internal_layout_tuples_modal_b200.py
 ```
 
 You can also run through `uv`:
 
 ```bash
-uv run --with modal modal run tools/dump_internal_layout_tuples_modal_b200.py
+uv run --with modal python tools/dump_internal_layout_tuples_modal_b200.py
 ```
 
 By default, the script runs only the stable `with_module_ip` mode and does not call
@@ -61,7 +62,7 @@ Optional flags:
   `with_explicit_loc`, `with_module_ip`)
 - `--try-cpasync-partition`: best-effort call to `cpasync.tma_partition`
 
-When using `modal run`, CLI options are not always forwarded. You can set env flags instead:
+You can also set env flags:
 
 - `NVFP4_PROBE_MODES=1`
 - `NVFP4_TRY_CPASYNC_PARTITION=1`

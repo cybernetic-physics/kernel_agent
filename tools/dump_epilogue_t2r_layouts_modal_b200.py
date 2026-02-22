@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Dump wagmiv67-style epilogue TMEM->register layouts on Modal B200."""
+"""Dump wagmiv67-style epilogue TMEM->register layouts on deployed Modal B200.
+
+Deploy once:
+    uv run --with modal modal deploy tools/dump_epilogue_t2r_layouts_modal_b200.py
+Then run repeatedly without `modal run`:
+    uv run --with modal python tools/dump_epilogue_t2r_layouts_modal_b200.py
+"""
 
 from __future__ import annotations
 
@@ -12,11 +18,14 @@ import modal
 
 APP_NAME = "nvfp4-wagmiv67-t2r-layouts-b200"
 DEFAULT_IMAGE = "nvidia/cuda:12.8.0-devel-ubuntu22.04"
+CACHE_VOLUME_NAME = "modal-tools-cache-v1"
+CACHE_MOUNT_PATH = "/cache"
 
 app = modal.App(APP_NAME)
 image = modal.Image.from_registry(DEFAULT_IMAGE, add_python="3.11").pip_install(
     "nvidia-cutlass-dsl==4.4.0"
 )
+cache_volume = modal.Volume.from_name(CACHE_VOLUME_NAME, create_if_missing=True)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -33,6 +42,17 @@ def _parse_args() -> argparse.Namespace:
         default=Path("artifacts/wagmiv67_t2r_layouts.json"),
         help="Path to write JSON output.",
     )
+    p.add_argument(
+        "--app-name",
+        default=APP_NAME,
+        help=f"Deployed Modal app name (default: {APP_NAME}).",
+    )
+    p.add_argument(
+        "--function-name",
+        default="_dump_one",
+        help="Deployed Modal function name (default: _dump_one).",
+    )
+    p.add_argument("--gpu", default="B200", help="GPU type (B200-only).")
     # Modal CLI may inject argv fragments into local entrypoint processes.
     args, _unknown = p.parse_known_args()
     return args
@@ -65,8 +85,20 @@ def _layout_record(layout: Any) -> dict[str, Any]:
     return out
 
 
-@app.function(image=image, gpu="B200", timeout=900)
+@app.function(
+    image=image,
+    gpu="B200",
+    timeout=900,
+    volumes={CACHE_MOUNT_PATH: cache_volume},
+)
 def _dump_one(shape_mnkl: tuple[int, int, int, int]) -> dict[str, Any]:
+    import os
+
+    os.environ.setdefault("XDG_CACHE_HOME", f"{CACHE_MOUNT_PATH}/xdg")
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", f"{CACHE_MOUNT_PATH}/torchinductor")
+    os.environ.setdefault("TRITON_CACHE_DIR", f"{CACHE_MOUNT_PATH}/triton")
+    os.environ.setdefault("CUDA_CACHE_PATH", f"{CACHE_MOUNT_PATH}/cuda")
+
     import cutlass
     import cutlass.cute as cute
     from cutlass._mlir import ir
@@ -128,16 +160,19 @@ def _dump_one(shape_mnkl: tuple[int, int, int, int]) -> dict[str, Any]:
                 }
 
 
-@app.local_entrypoint()
 def main() -> None:
     args = _parse_args()
+    if args.gpu != "B200":
+        raise SystemExit("dump_epilogue_t2r_layouts_modal_b200.py is B200-only.")
+
     default_shapes = [
         (80, 4096, 7168, 1),
         (40, 7168, 2048, 1),
     ]
     shapes = [_parse_shape(s) for s in args.shape] if args.shape else default_shapes
 
-    result = {str(tuple(shape)): _dump_one.remote(shape) for shape in shapes}
+    remote_fn = modal.Function.from_name(args.app_name, args.function_name)
+    result = {str(tuple(shape)): remote_fn.remote(shape) for shape in shapes}
     text = json.dumps(result, indent=2)
 
     if args.json_out:
@@ -146,3 +181,7 @@ def main() -> None:
         print(f"[INFO] Wrote: {args.json_out}")
 
     print(text)
+
+
+if __name__ == "__main__":
+    main()
