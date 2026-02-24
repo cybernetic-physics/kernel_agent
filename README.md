@@ -7,6 +7,8 @@ Workspace for coding agents (ChatGPT/Codex) to develop and evaluate GPU kernels 
 - `kernels/` place new kernel submissions here
 - `artifacts/` run outputs (test/benchmark/leaderboard logs)
 - `docs/POPCORN_RUN_GUIDE.md` quick reference for nvfp4_group_gemm run flow
+- `docs/RALPH_LOOP_KERNEL_OPTIMIZATION.md` how to run bounded autonomous kernel optimization loops with Ralph Loop
+- `docs/MULTI_SESSION_LOOP_COORDINATOR_SPEC.md` external worker/reviewer orchestration spec for continuous runs
 
 ## Setup
 Install the local tool environment once:
@@ -47,6 +49,25 @@ uv run --with modal python tools/modal_python_exec.py --gpu B200 --mount-repo --
 - `tools/dump_ptx_modal.py`: extract PTX for a kernel on Modal.
 - `tools/disassemble_cubin_modal.py`: disassemble CUBIN/SASS on Modal.
 - `tools/debug_cutlass_compile_modal.py`: gather detailed CUTLASS compile diagnostics on Modal.
+- `tools/loop_coordinator.py`: external worker/reviewer orchestration for continuous optimization loops.
+- `tools/loop_verdict_schema.py`: validate `worker_result.json` and `reviewer_verdict.json` payloads.
+
+## Loop Coordinator Quickstart
+Initialize state and run in dry-run mode:
+
+```bash
+bash tools/run_loop_coordinator.sh \
+  --fresh-start \
+  --execution-mode dry-run \
+  --kernel-path kernels/nvfp4_group_gemm_001.py \
+  --target-metric-name gmean_us \
+  --target-metric-threshold 320 \
+  --max-iterations 5
+```
+
+For real two-session operation, use `--execution-mode manual` and have Session A/B write:
+- `artifacts/loop_coordinator/iter_XXXX/worker_result.json`
+- `artifacts/loop_coordinator/iter_XXXX/reviewer_verdict.json`
 
 ## Skills Compatibility (Codex + Claude Code)
 - Canonical skills live in `skills/codex/`.

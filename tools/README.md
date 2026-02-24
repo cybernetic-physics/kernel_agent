@@ -68,6 +68,27 @@ set -a; source .env; set +a
 
 ## Script catalog
 
+### `loop_coordinator.py`
+- What it does: runs an external state machine for worker/reviewer optimization loops with lockfile, heartbeat, stop conditions, and per-iteration artifacts.
+- Modes:
+  - `manual`: waits for `worker_result.json` / `reviewer_verdict.json` from external sessions.
+  - `command`: runs worker/reviewer command templates each iteration.
+  - `dry-run`: synthesizes outputs to validate wiring.
+- Example:
+  - `uv run python tools/loop_coordinator.py --fresh-start --execution-mode dry-run --kernel-path kernels/nvfp4_group_gemm_001.py --target-metric-name gmean_us --target-metric-threshold 320 --max-iterations 5`
+- State root (default): `artifacts/loop_coordinator/`
+
+### `loop_verdict_schema.py`
+- What it does: validates iteration payload JSON against coordinator-required schema.
+- Examples:
+  - `uv run python tools/loop_verdict_schema.py --kind worker --json-file artifacts/loop_coordinator/iter_0001/worker_result.json`
+  - `uv run python tools/loop_verdict_schema.py --kind reviewer --json-file artifacts/loop_coordinator/iter_0001/reviewer_verdict.json`
+
+### `run_loop_coordinator.sh`
+- What it does: thin wrapper around `tools/loop_coordinator.py` with repo-root defaults.
+- Example:
+  - `bash tools/run_loop_coordinator.sh --execution-mode dry-run --max-iterations 3`
+
 ### `dump_internal_layout_tuples.py`
 - What it does: local dump of core internal layouts (`a/b smem`, `sfa/sfb smem`, `tCtSFA/SFB`).
 - Needs: local CUTLASS.
