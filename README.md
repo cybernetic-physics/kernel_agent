@@ -69,6 +69,12 @@ For real two-session operation, use `--execution-mode manual` and have Session A
 - `artifacts/loop_coordinator/iter_XXXX/worker_result.json`
 - `artifacts/loop_coordinator/iter_XXXX/reviewer_verdict.json`
 
+Afterhours live loop with TUI:
+
+```bash
+just loop-afterhours target_threshold=9.5 max_iterations=600
+```
+
 ## Skills Compatibility (Codex + Claude Code)
 - Canonical skills live in `skills/codex/`.
 - Claude Code project discovery uses `.claude/skills/`.

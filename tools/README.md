@@ -89,6 +89,17 @@ set -a; source .env; set +a
 - Example:
   - `bash tools/run_loop_coordinator.sh --execution-mode dry-run --max-iterations 3`
 
+### `loop_tui.py`
+- What it does: small terminal UI that shows live coordinator heartbeat, iteration file status, and recent run log.
+- Modes:
+  - monitor only: `python3 tools/loop_tui.py`
+  - launch + monitor: `python3 tools/loop_tui.py --run -- python3 tools/loop_coordinator.py ...`
+
+### `run_loop_afterhours.py`
+- What it does: convenience launcher for the afterhours worker/reviewer loop with key=value overrides.
+- Example:
+  - `python3 tools/run_loop_afterhours.py target_threshold=9.5 max_iterations=600`
+
 ### `dump_internal_layout_tuples.py`
 - What it does: local dump of core internal layouts (`a/b smem`, `sfa/sfb smem`, `tCtSFA/SFB`).
 - Needs: local CUTLASS.
