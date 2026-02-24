@@ -47,6 +47,58 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _run_progress_report(
+    repo_root: Path,
+    progress_json: Path,
+    *,
+    status: str,
+    note: str,
+    metric_name: str,
+    iteration: int,
+    time_us: float | None = None,
+    artifact: str = "",
+    errors: list[str] | None = None,
+) -> None:
+    cmd = [
+        "python3",
+        "tools/loop_best_time_report.py",
+        "--progress-json",
+        str(progress_json),
+        "--status",
+        status,
+        "--note",
+        note,
+        "--metric-name",
+        metric_name,
+        "--iteration",
+        str(iteration),
+    ]
+    if time_us is not None:
+        cmd.extend(["--time-us", str(float(time_us))])
+    if artifact:
+        cmd.extend(["--artifact", artifact])
+    for err in errors or []:
+        cmd.extend(["--error", err])
+    subprocess.run(
+        cmd,
+        cwd=str(repo_root),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _render_reporting_prompt(repo_root: Path, progress_json: Path) -> str:
+    template = repo_root / "prompts" / "worker_best_time_reporting_prompt.md"
+    if not template.exists():
+        return (
+            "Use skill `loop-best-time-report` and report live updates via:\n"
+            f"python3 tools/loop_best_time_report.py --progress-json \"{progress_json}\" ..."
+        )
+    text = template.read_text(encoding="utf-8")
+    return text.replace("<progress_json_path>", str(progress_json))
+
+
 def main() -> int:
     args = _parse_args()
     repo_root = args.repo_root.resolve()
@@ -54,15 +106,27 @@ def main() -> int:
     output_json = args.output_json.resolve()
     output_dir = output_json.parent
     output_dir.mkdir(parents=True, exist_ok=True)
+    progress_json = output_dir / "worker_progress.json"
     transcript_path = output_dir / "worker_claude_output.txt"
     stderr_path = output_dir / "worker_claude_error.txt"
+    _run_progress_report(
+        repo_root,
+        progress_json,
+        status="running",
+        note="worker iteration started",
+        metric_name=args.metric_name,
+        iteration=args.iteration,
+    )
 
     base_prompt = prompt_file.read_text(encoding="utf-8")
+    reporting_prompt = _render_reporting_prompt(repo_root, progress_json)
     extra_prompt = f"""
 
 Coordinator constraints for this single iteration:
 - Perform exactly one kernel-side change at most.
 - You must execute afterhours validation flow from the prompt and collect evidence.
+- Required skill to use for live progress: `loop-best-time-report`.
+- Progress file for loop TUI: {progress_json}
 - You must finish by writing JSON to: {output_json}
 - JSON schema required:
   {{
@@ -79,6 +143,9 @@ Coordinator constraints for this single iteration:
 - Use absolute or repo-relative artifact paths.
 - If benchmark/test cannot run, set decision to REVERT and include errors.
 - Return after writing the JSON file.
+
+Live best-time reporting prompt:
+{reporting_prompt}
 """
     full_prompt = base_prompt.rstrip() + "\n" + extra_prompt.strip() + "\n"
 
@@ -109,6 +176,15 @@ Coordinator constraints for this single iteration:
             [f"worker Claude timeout after {args.timeout_seconds} seconds"],
         )
         _write_json(output_json, payload)
+        _run_progress_report(
+            repo_root,
+            progress_json,
+            status="blocked",
+            note=f"worker timeout after {args.timeout_seconds}s",
+            metric_name=args.metric_name,
+            iteration=args.iteration,
+            errors=payload["errors"],
+        )
         transcript_path.write_text("", encoding="utf-8")
         stderr_path.write_text(
             f"timeout after {args.timeout_seconds} seconds\n", encoding="utf-8"
@@ -123,19 +199,80 @@ Coordinator constraints for this single iteration:
             args, [f"worker did not produce required JSON ({output_json})"]
         )
         _write_json(output_json, payload)
+        _run_progress_report(
+            repo_root,
+            progress_json,
+            status="blocked",
+            note="worker missing required worker_result.json",
+            metric_name=args.metric_name,
+            iteration=args.iteration,
+            errors=payload["errors"],
+        )
 
     try:
         payload = json.loads(output_json.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         payload = _fallback_payload(args, [f"worker JSON parse failure: {exc}"])
         _write_json(output_json, payload)
+        _run_progress_report(
+            repo_root,
+            progress_json,
+            status="blocked",
+            note="worker_result.json parse failure",
+            metric_name=args.metric_name,
+            iteration=args.iteration,
+            errors=payload["errors"],
+        )
         return proc.returncode if proc.returncode != 0 else 1
 
     errs = validate_worker_result(payload)
     if errs:
         payload = _fallback_payload(args, [f"worker schema validation failed: {e}" for e in errs])
         _write_json(output_json, payload)
+        _run_progress_report(
+            repo_root,
+            progress_json,
+            status="blocked",
+            note="worker_result schema validation failed",
+            metric_name=args.metric_name,
+            iteration=args.iteration,
+            errors=payload["errors"],
+        )
         return proc.returncode if proc.returncode != 0 else 1
+
+    artifact = ""
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, list):
+        for item in artifacts:
+            if isinstance(item, str) and item.strip():
+                artifact = item
+                break
+
+    metric_value = payload.get("metric_value")
+    metric_time: float | None = None
+    if isinstance(metric_value, (int, float)) and not isinstance(metric_value, bool):
+        # Ignore sentinel fallback-like values.
+        if float(metric_value) < 1.0e17:
+            metric_time = float(metric_value)
+
+    status = "completed"
+    errors_raw = payload.get("errors")
+    report_errors: list[str] = []
+    if isinstance(errors_raw, list):
+        report_errors = [str(e) for e in errors_raw if isinstance(e, str)]
+    if payload.get("decision") == "REVERT" and report_errors:
+        status = "blocked"
+    _run_progress_report(
+        repo_root,
+        progress_json,
+        status=status,
+        note=f"worker finished with decision={payload.get('decision')}",
+        metric_name=str(payload.get("metric_name", args.metric_name)),
+        iteration=args.iteration,
+        time_us=metric_time,
+        artifact=artifact,
+        errors=report_errors,
+    )
 
     return proc.returncode
 

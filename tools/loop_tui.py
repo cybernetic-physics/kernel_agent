@@ -49,6 +49,27 @@ def _iter_dirs(state_root: Path) -> list[Path]:
     return sorted(out)
 
 
+def _best_time_snapshot(state_root: Path) -> tuple[float | None, str]:
+    best: float | None = None
+    best_src = ""
+    for it in _iter_dirs(state_root):
+        progress = _read_json(it / "worker_progress.json") or {}
+        p_val = progress.get("best_time_us")
+        if isinstance(p_val, (int, float)) and not isinstance(p_val, bool):
+            pv = float(p_val)
+            if best is None or pv < best:
+                best = pv
+                best_src = f"{it.name}/worker_progress.json"
+        wr = _read_json(it / "worker_result.json") or {}
+        wv = wr.get("metric_value")
+        if isinstance(wv, (int, float)) and not isinstance(wv, bool):
+            vv = float(wv)
+            if vv < 1.0e17 and (best is None or vv < best):
+                best = vv
+                best_src = f"{it.name}/worker_result.json"
+    return best, best_src
+
+
 def _is_pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -107,6 +128,7 @@ def _render(ui: UiState) -> str:
     infra_failure_count = hb.get("infra_failure_count", 0)
     target_conf = hb.get("target_confirmation_count", 0)
     hb_updated = hb.get("updated_at", "n/a")
+    global_best, global_best_src = _best_time_snapshot(ui.state_root)
 
     lock_pid = lock.get("pid")
     lock_alive = _is_pid_alive(int(lock_pid)) if isinstance(lock_pid, int) else False
@@ -123,12 +145,16 @@ def _render(ui: UiState) -> str:
     if iter_dir is not None:
         file_checks = [
             ("worker_prompt.txt", (iter_dir / "worker_prompt.txt").exists()),
+            ("worker_progress.json", (iter_dir / "worker_progress.json").exists()),
             ("worker_result.json", (iter_dir / "worker_result.json").exists()),
             ("reviewer_prompt.txt", (iter_dir / "reviewer_prompt.txt").exists()),
             ("reviewer_verdict.json", (iter_dir / "reviewer_verdict.json").exists()),
             ("metrics_snapshot.json", (iter_dir / "metrics_snapshot.json").exists()),
             ("status.json", (iter_dir / "status.json").exists()),
         ]
+    progress = _read_json(iter_dir / "worker_progress.json") if iter_dir is not None else {}
+    if progress is None:
+        progress = {}
 
     lines: list[str] = []
     lines.append("Loop Coordinator TUI")
@@ -146,6 +172,9 @@ def _render(ui: UiState) -> str:
     lines.append(
         f"no_progress={no_progress_count} infra_failures={infra_failure_count} target_confirmations={target_conf}"
     )
+    lines.append(
+        f"global_best_time_us={global_best} source={global_best_src if global_best_src else 'n/a'}"
+    )
     if ctl.get("reason"):
         lines.append(f"control.reason: {ctl.get('reason')}")
 
@@ -155,6 +184,16 @@ def _render(ui: UiState) -> str:
         for name, exists in file_checks:
             status = "[x]" if exists else "[ ]"
             lines.append(f"{status} {name}")
+        lines.append(
+            "worker_progress: "
+            f"status={progress.get('status', 'n/a')} "
+            f"last_time_us={progress.get('last_time_us')} "
+            f"best_time_us={progress.get('best_time_us')} "
+            f"updated_at={progress.get('updated_at', 'n/a')}"
+        )
+        note = progress.get("note")
+        if isinstance(note, str) and note.strip():
+            lines.append(f"worker_progress.note: {note.strip()}")
 
     lines.append("-" * 80)
     lines.append(f"Recent run log ({ui.tail_lines} lines)")

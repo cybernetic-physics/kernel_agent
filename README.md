@@ -75,6 +75,8 @@ Afterhours live loop with TUI:
 just loop-afterhours target_threshold=9.5 max_iterations=600
 ```
 
+The worker uses `loop-best-time-report` and writes `artifacts/loop_coordinator/iter_XXXX/worker_progress.json` so TUI shows live best `gmean_us` while runs are still executing.
+
 ## Skills Compatibility (Codex + Claude Code)
 - Canonical skills live in `skills/codex/`.
 - Claude Code project discovery uses `.claude/skills/`.

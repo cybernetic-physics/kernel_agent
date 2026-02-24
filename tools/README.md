@@ -94,11 +94,17 @@ set -a; source .env; set +a
 - Modes:
   - monitor only: `python3 tools/loop_tui.py`
   - launch + monitor: `python3 tools/loop_tui.py --run -- python3 tools/loop_coordinator.py ...`
+- Displays worker-reported best-time updates from `iter_XXXX/worker_progress.json`.
 
 ### `run_loop_afterhours.py`
 - What it does: convenience launcher for the afterhours worker/reviewer loop with key=value overrides.
 - Example:
   - `python3 tools/run_loop_afterhours.py target_threshold=9.5 max_iterations=600`
+
+### `loop_best_time_report.py`
+- What it does: update `worker_progress.json` with live benchmark timing and best-time tracking (`gmean_us`, lower is better).
+- Example:
+  - `python3 tools/loop_best_time_report.py --progress-json artifacts/loop_coordinator/iter_0001/worker_progress.json --status benchmark --time-us 312.4 --artifact artifacts/run.txt --note "candidate benchmark"`
 
 ### `dump_internal_layout_tuples.py`
 - What it does: local dump of core internal layouts (`a/b smem`, `sfa/sfb smem`, `tCtSFA/SFB`).
